@@ -3,18 +3,20 @@ dotenv.config()
 
 import fs from 'fs'
 import path from 'path'
-import { Client, REST, Routes, GatewayIntentBits, Activity, ActivityType } from 'discord.js';
+import { Client, REST, Routes, GatewayIntentBits, Activity, ActivityType, ButtonBuilder, ActionRowBuilder, ButtonStyle } from 'discord.js';
 import { pathToFileURL } from 'url'
 
 const TOKEN = process.env.TOKEN
 const APP_ID = process.env.APP_ID
 const CONFIG_PATH = path.resolve('./data/config.json')
 
+const commands = []
+const commandsMap = new Map()
+
 if (!TOKEN || !APP_ID) {
 	console.error('.env must contain TOKEN and APP_ID')
 	process.exit(1)
 }
-
 
 function loadConfig() {
 	try {
@@ -36,9 +38,6 @@ function saveConfig(cfg) {
 		console.error('Failed to save config:', err)
 	}
 }
-
-const commands = []
-const commandsMap = new Map()
 
 async function loadCommands() {
 	const commandsPath = path.resolve('./commands')
@@ -81,13 +80,14 @@ setInterval(() => {
 },10000)
 
 setInterval inside of client.once('ready', async () => {})
+
 */
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] })
 
 client.once('clientReady', async () => {
 	console.log(`Logged in as ${client.user.tag}`)
-    client.user.setActivity({ name: 'github', state: 'TESTING', type: ActivityType.Custom, url: 'https://github.com/Rodrigo-F-Nunes'});
+    client.user.setActivity({ name: 'github', state: 'on_test', type: ActivityType.Custom, url: 'https://github.com/Rodrigo-F-Nunes'});
 	await registerCommandsForGuilds(client.guilds.cache.values())
 })
 
@@ -99,8 +99,7 @@ client.on('interactionCreate', async interaction => {
 
 				const handler = commandsMap.get(interaction.commandName)
 				if (!handler) return interaction.reply({ content: 'Command not implemented on the bot.', ephemeral: true })
-
-				// Provide command handlers access to config helpers
+					
 				// Pass commandsMap to help command for dynamic listing
 				return handler(interaction, { loadConfig, saveConfig, client, commandsMap })
 			}
@@ -123,16 +122,98 @@ client.on('interactionCreate', async interaction => {
 			const selected = interaction.values[0]
 			let optionText = ''
 			if (selected === 'id_1') optionText = 'Opção 1'
-			else if (selected === 'id_2') optionText = 'Opção 2' //It's ugly but works
+			else if (selected === 'id_2') optionText = 'Opção 2'
 			else if (selected === 'id_3') optionText = 'Opção 3'
 			else optionText = selected
 
+			if (!global.ticketRequests) global.ticketRequests = new Map()
+			global.ticketRequests.set(`ticket_${interaction.user.id}`, { userId: interaction.user.id, optionText })
+
+			const claimButton = new ButtonBuilder()
+				.setCustomId(`claim_ticket_${interaction.user.id}`)
+				.setLabel('Claim ticket')
+				.setStyle(ButtonStyle.Success)
+
+			const row = new ActionRowBuilder().addComponents(claimButton)
+
 			await notifyChannel.send({
 				content: `<@&${guildCfg.roleId}> <@${interaction.user.id}> fez um pedido: **${optionText}**`,
-				allowedMentions: { roles: [guildCfg.roleId], users: [interaction.user.id] }
+				allowedMentions: { roles: [guildCfg.roleId], users: [interaction.user.id] },
+				components: [row]
 			})
 			return interaction.editReply({ content: `Pedido recebido! Um moderador entrará em contato brevemente em ${notifyChannel}.`, ephemeral: true })
 		}
+
+		if (interaction.isButton() && interaction.customId.startsWith('claim_ticket_')) {
+			await interaction.deferReply({ ephemeral: true })
+			const requestKey = interaction.customId.replace('claim_ticket_', 'ticket_')
+			const ticketInfo = global.ticketRequests?.get(requestKey)
+			if (!ticketInfo) return interaction.editReply({ content: 'Ticket info not found.', ephemeral: true })
+			const userId = ticketInfo.userId
+			const optionText = ticketInfo.optionText
+			const claimerId = interaction.user.id
+			const guild = interaction.guild
+			if (!guild) return interaction.editReply({ content: 'Guild not found.', ephemeral: true })
+
+			try {
+				const originalMsg = await interaction.message.fetch()
+				if (originalMsg) {
+					await originalMsg.edit({ components: [] })
+				}
+			} catch (e) {
+				console.error('Failed to remove claim button:', e)
+			}
+
+			const user = await client.users.fetch(userId).catch(() => null)
+			const claimer = await client.users.fetch(claimerId).catch(() => null)
+			const clean = name => name?.replace(/[^a-zA-Z0-9-_]/g, '').toLowerCase() || 'unknown'
+			const ticketChannelName = `ticket-${clean(user?.username)}-${clean(claimer?.username)}`
+
+			const ticketChannel = await guild.channels.create({
+				name: ticketChannelName.slice(0, 90),
+				type: 0,
+				permissionOverwrites: [
+					{ id: guild.id, deny: ['ViewChannel'] },
+					{ id: userId, allow: ['ViewChannel', 'SendMessages'] },
+					{ id: claimerId, allow: ['ViewChannel', 'SendMessages'] },
+					{ id: client.user.id, allow: ['ViewChannel', 'SendMessages'] },
+				]
+			})
+
+			const closeButton = new ButtonBuilder()
+				.setCustomId(`close_ticket_${ticketChannel.id}`)
+				.setLabel('Fechar ticket')
+				.setStyle(ButtonStyle.Danger)
+
+			const closeRow = new ActionRowBuilder().addComponents(closeButton)
+			await ticketChannel.send({
+				content: `Ticket criado para <@${userId}> e <@${claimerId}>. Pedido: **${optionText}**\n\n`,
+				components: [closeRow]
+			})
+			return interaction.editReply({ content: `Ticket criado: ${ticketChannel}.`})
+
+		}
+
+		if (interaction.isButton() && interaction.customId.startsWith('close_ticket_')) {
+			await interaction.deferReply({ ephemeral: true })
+			const channel = interaction.channel
+
+			const member = interaction.member
+			if (!member.permissions.has('ManageChannels')) {
+				return interaction.editReply({ content: 'Apenas moderadores do ticket podem fechá-lo.'})
+			}
+
+			await interaction.editReply({ content: 'Fechando o ticket...' })
+
+			setTimeout(async () => {
+				try {
+					await channel.delete('Ticket fechado pelo usuário via botão.')
+				} catch (err) {
+					console.error('Erro ao deletar o ticket:', err)
+				}
+			}, 2000)
+		}
+
 	} catch (err) {
 		console.error('Interaction handler error:', err)
 		try { if (interaction.replied || interaction.deferred) await interaction.editReply({ content: 'An error occurred while handling your request.', ephemeral: true })
