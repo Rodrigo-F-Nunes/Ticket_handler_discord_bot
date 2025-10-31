@@ -5,7 +5,6 @@ export const data = new SlashCommandBuilder()
 	.setDescription('List all bot commands and their descriptions')
 
 export async function execute(interaction, context) {
-	// context.commandsMap is available if passed from app.js
 	const commandsList = []
 	if (context && context.commandsMap) {
 		for (const [name, handler] of context.commandsMap.entries()) {
@@ -26,7 +25,9 @@ export async function execute(interaction, context) {
 		commandsList.push(
 			{ name: 'setchannel', description: 'Set the channel for notifications.' },
 			{ name: 'setroletoping', description: 'Set the role to ping.' },
-			{ name: 'createmsg', description: 'Create the banner message with a button.' }
+			{ name: 'createmsg', description: 'Create the banner message with a button.' },
+			{ name: 'status', description: 'Check if the bot is online and see its uptime.' },
+			{ name: 'setlogchannel', description: 'Set the channel that will receive the status and users of previous tickets.' },
 		)
 	}
 
