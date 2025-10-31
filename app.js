@@ -99,7 +99,7 @@ client.on('interactionCreate', async interaction => {
 
 				const handler = commandsMap.get(interaction.commandName)
 				if (!handler) return interaction.reply({ content: 'Command not implemented on the bot.', ephemeral: true })
-					
+
 				// Pass commandsMap to help command for dynamic listing
 				return handler(interaction, { loadConfig, saveConfig, client, commandsMap })
 			}
@@ -197,8 +197,10 @@ client.on('interactionCreate', async interaction => {
 		if (interaction.isButton() && interaction.customId.startsWith('close_ticket_')) {
 			await interaction.deferReply({ ephemeral: true })
 			const channel = interaction.channel
-
 			const member = interaction.member
+			const guildId = interaction.guildId
+			const cfg = loadConfig()
+
 			if (!member.permissions.has('ManageChannels')) {
 				return interaction.editReply({ content: 'Apenas moderadores do ticket podem fechá-lo.'})
 			}
@@ -207,7 +209,30 @@ client.on('interactionCreate', async interaction => {
 
 			setTimeout(async () => {
 				try {
-					await channel.delete('Ticket fechado pelo usuário via botão.')
+					const logChannelId = cfg[guildId]?.logChannelId
+					let logDetails = `Ticket ${channel.name} foi fechado por <@${member.id}>.`
+					let userId = null, optionText = null
+					if (global.ticketRequests) {
+						for (const [key, info] of global.ticketRequests.entries()) {
+							if (info && channel.name.includes(info.userId)) {
+								userId = info.userId
+								optionText = info.optionText
+								break
+							}
+						}
+					}
+					if (userId && optionText) {
+						logDetails += `\nUsuário: <@${userId}>\nOpção escolhida: **${optionText}**`
+					}
+					if (logChannelId) {
+						const logChannel = await client.channels.fetch(logChannelId).catch(() => null)
+						if (logChannel) {
+							await logChannel.send({
+								content: logDetails
+							})
+						}
+					}
+					await channel.delete('Ticket fechado via botão.')
 				} catch (err) {
 					console.error('Erro ao deletar o ticket:', err)
 				}
