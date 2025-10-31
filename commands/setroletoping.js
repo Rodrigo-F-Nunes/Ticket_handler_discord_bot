@@ -22,5 +22,5 @@ export async function execute(interaction, { loadConfig, saveConfig }) {
   cfg[guildId] = cfg[guildId] || {}
   cfg[guildId].roleId = role.id
   saveConfig(cfg)
-  return interaction.reply({ content: `Role to ping set to ${role}.`, ephemeral: true })
+  return interaction.reply({ content: `Role to ping set to ${role}.`})
 }
